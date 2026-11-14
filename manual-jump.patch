@@ -1,0 +1,33 @@
+--- a/soh/src/overlays/actors/ovl_player_actor/z_player.c
++++ b/soh/src/overlays/actors/ovl_player_actor/z_player.c
+@@ -6449,6 +6449,16 @@
+ s32 Player_ActionHandler_Roll(Player* this, PlayState* play) {
+     if (!Player_UpdateHostileLockOn(this) && !sUpperBodyIsBusy && !(this->stateFlags1 & PLAYER_STATE1_ON_HORSE) &&
+         CHECK_BTN_ALL(sControlInput->press.button, BTN_A)) {
++        // Manual Jump: this handler runs last in the action handler lists, so reaching it means A has no
++        // contextual action. Jump instead of rolling; pressing B in the air then uses the vanilla jump slash
++        // (Player_Action_8084411C -> func_8083BBA0).
++        if (CVarGetInteger(CVAR_ENHANCEMENT("ManualJump"), 0) && (sFloorType != 7) &&
++            (play->roomCtx.curRoom.behaviorType1 != ROOM_BEHAVIOR_TYPE1_2) &&
++            !(this->stateFlags1 & PLAYER_STATE1_IN_WATER) && (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND)) {
++            func_8083A4A8(this, play);
++            return true;
++        }
++
+         if (Player_TryRoll(this, play)) {
+             return true;
+         } else if ((this->putAwayCooldownTimer == 0) && (this->heldItemAction >= PLAYER_IA_SWORD_MASTER)) {
+--- a/soh/soh/SohGui/SohMenuEnhancements.cpp
++++ b/soh/soh/SohGui/SohMenuEnhancements.cpp
+@@ -291,6 +291,11 @@
+ 
+     path.column = SECTION_COLUMN_2;
+     AddWidget(path, "Controls", WIDGET_SEPARATOR_TEXT);
++    AddWidget(path, "Manual Jump (A Button)", WIDGET_CVAR_CHECKBOX)
++        .CVar(CVAR_ENHANCEMENT("ManualJump"))
++        .Options(CheckboxOptions().Tooltip(
++            "A jumps when it has no contextual action (replaces the roll). Press B in the air with a sword "
++            "drawn for a jump attack. Z-targeting + A keeps its vanilla behavior."));
+     AddWidget(path, "Answer Navi Prompt with L Button", WIDGET_CVAR_CHECKBOX)
+         .CVar(CVAR_ENHANCEMENT("NaviOnL"))
+         .RaceDisable(false)
