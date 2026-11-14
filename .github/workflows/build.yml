@@ -1,0 +1,86 @@
+name: build-manual-jump
+
+on:
+  workflow_dispatch:
+
+jobs:
+  generate-soh-otr:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout Shipwright 9.3.1
+      uses: actions/checkout@v7
+      with:
+        repository: HarbourMasters/Shipwright
+        ref: 9.3.1
+        submodules: true
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y $(cat linux-build-deps/apt.txt)
+    - name: Generate soh.o2r
+      run: |
+        cmake --no-warn-unused-cli -H. -Bbuild-cmake -GNinja -DCMAKE_BUILD_TYPE:STRING=Release -DSOH_TOOLS_ONLY=ON
+        cmake --build build-cmake --config Release --target GenerateSohOtr -j4
+    - name: Upload soh.o2r
+      uses: actions/upload-artifact@v7
+      with:
+        name: soh.o2r
+        path: soh.o2r
+        retention-days: 3
+
+  build-windows:
+    needs: generate-soh-otr
+    runs-on: windows-latest
+    steps:
+    - name: Keep LF line endings
+      run: git config --global core.autocrlf false
+    - name: Install dependencies
+      run: |
+        choco install ninja -y
+        Remove-Item -Path "C:\ProgramData\Chocolatey\bin\ccache.exe" -Force -ErrorAction SilentlyContinue
+    - name: Checkout Shipwright 9.3.1
+      uses: actions/checkout@v7
+      with:
+        repository: HarbourMasters/Shipwright
+        ref: 9.3.1
+        submodules: true
+    - name: Checkout this repo (patch)
+      uses: actions/checkout@v7
+      with:
+        path: mod
+    - name: Apply Manual Jump patch
+      run: git apply --ignore-whitespace --verbose mod/manual-jump.patch
+    - name: Configure ccache
+      uses: hendrikmuhs/ccache-action@v1.2.23
+      with:
+        max-size: "2G"
+        evict-old-files: job
+        save: false
+        key: ${{ runner.os }}-ccache-manualjump
+    - name: Configure Developer Command Prompt
+      uses: TheMrMilchmann/setup-msvc-dev@v4
+      with:
+        arch: x64
+    - name: Download soh.o2r
+      uses: actions/download-artifact@v8
+      with:
+        name: soh.o2r
+        path: build-windows/soh
+    - name: Build SoH
+      env:
+        VCPKG_ROOT: ${{github.workspace}}/vcpkg
+      run: |
+        set $env:PATH="$env:USERPROFILE/.cargo/bin;$env:PATH"
+        cmake -S . -B build-windows -G Ninja -DCMAKE_MAKE_PROGRAM=ninja -DCMAKE_BUILD_TYPE:STRING=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DBUILD_REMOTE_CONTROL=1
+        cmake --build build-windows --config Release --parallel 10
+
+        (cd build-windows && cpack)
+        cd ..
+        mv _packages/*.zip _packages/soh-windows.zip
+    - name: Unzip package
+      run: Expand-Archive -Path _packages/soh-windows.zip -DestinationPath soh-windows
+    - name: Upload build
+      uses: actions/upload-artifact@v7
+      with:
+        name: soh-windows-manual-jump
+        path: soh-windows
